@@ -199,7 +199,6 @@ _mali_osk_errcode_t mali_memory_cow_modify_range(mali_mem_backend *backend,
 		u32 range_size)
 {
 	mali_mem_allocation *alloc = NULL;
-    struct mali_session_data *session;
 	mali_mem_cow *cow = &backend->cow_mem;
 	struct mali_page_node *m_page, *m_tmp;
 	LIST_HEAD(pages);
@@ -212,9 +211,6 @@ _mali_osk_errcode_t mali_memory_cow_modify_range(mali_mem_backend *backend,
 
 	alloc = backend->mali_allocation;
 	MALI_DEBUG_ASSERT_POINTER(alloc);
-
-    session = alloc->session;
-    MALI_DEBUG_ASSERT_POINTER(session);
 
 	MALI_DEBUG_ASSERT(MALI_MEM_COW == backend->type);
 	MALI_DEBUG_ASSERT(((range_start + range_size) / _MALI_OSK_MALI_PAGE_SIZE) <= cow->count);
@@ -235,13 +231,10 @@ _mali_osk_errcode_t mali_memory_cow_modify_range(mali_mem_backend *backend,
 			if (1 != _mali_page_node_get_ref_count(m_page))
 				change_pages_nr++;
 			/* unref old page*/
-            _mali_osk_mutex_wait(session->cow_lock);
 			if (_mali_mem_put_page_node(m_page)) {
 				__free_page(new_page);
-                _mali_osk_mutex_signal(session->cow_lock);
 				goto error;
 			}
-            _mali_osk_mutex_signal(session->cow_lock);
 			/* add new page*/
 			/* always use OS for COW*/
 			m_page->type = MALI_PAGE_NODE_OS;
@@ -444,7 +437,6 @@ _mali_osk_errcode_t mali_mem_cow_cpu_map_pages_locked(mali_mem_backend *mem_bken
 u32 mali_mem_cow_release(mali_mem_backend *mem_bkend, mali_bool is_mali_mapped)
 {
 	mali_mem_allocation *alloc;
-    struct mali_session_data *session;
 	u32 free_pages_nr = 0;
 	MALI_DEBUG_ASSERT_POINTER(mem_bkend);
 	MALI_DEBUG_ASSERT(MALI_MEM_COW == mem_bkend->type);
@@ -453,14 +445,8 @@ u32 mali_mem_cow_release(mali_mem_backend *mem_bkend, mali_bool is_mali_mapped)
 	/* Unmap the memory from the mali virtual address space. */
 	if (MALI_TRUE == is_mali_mapped)
 		mali_mem_os_mali_unmap(alloc);
-
-    session = alloc->session;
-    MALI_DEBUG_ASSERT_POINTER(session);
-
 	/* free cow backend list*/
-    _mali_osk_mutex_wait(session->cow_lock);
 	free_pages_nr = mali_mem_os_free(&mem_bkend->cow_mem.pages, mem_bkend->cow_mem.count, MALI_TRUE);
-    _mali_osk_mutex_signal(session->cow_lock);
 	free_pages_nr += mali_mem_block_free_list(&mem_bkend->cow_mem.pages);
 	MALI_DEBUG_ASSERT(list_empty(&mem_bkend->cow_mem.pages));
 
@@ -479,7 +465,7 @@ void _mali_mem_cow_copy_page(mali_page_node *src_node, struct page *new_page)
 	MALI_DEBUG_ASSERT(src_node != NULL);
 
 	dma_unmap_page(&mali_platform_device->dev, page_private(new_page),
-		       _MALI_OSK_MALI_PAGE_SIZE, DMA_BIDIRECTIONAL);
+		       _MALI_OSK_MALI_PAGE_SIZE, DMA_TO_DEVICE);
 	/* map it , and copy the content*/
 
 	dst = kmap_atomic(new_page);
@@ -489,24 +475,24 @@ void _mali_mem_cow_copy_page(mali_page_node *src_node, struct page *new_page)
 		/*clear cache */
 
 		dma_unmap_page(&mali_platform_device->dev, page_private(src_page),
-			       _MALI_OSK_MALI_PAGE_SIZE, DMA_BIDIRECTIONAL);
+			       _MALI_OSK_MALI_PAGE_SIZE, DMA_TO_DEVICE);
 		src = kmap_atomic(src_page);
 #ifdef CONFIG_ARM
 		/* It seem have cache coherence issue if we use
 		* kmap to map the src_page. we need to invlidate L2 cache here
 		*/
-		//outer_inv_range(page_to_phys(src_page), page_to_phys(src_page) + _MALI_OSK_MALI_PAGE_SIZE);
+		outer_inv_range(page_to_phys(src_page), page_to_phys(src_page) + _MALI_OSK_MALI_PAGE_SIZE);
 #else
 		/* use sync for CPU for arm64 becasue no HIGMEM in aarch 64,
 		* So this function can work
 		*/
-		//dma_sync_single_for_cpu(&mali_platform_device->dev, page_private(src_page),
-		//			_MALI_OSK_MALI_PAGE_SIZE, DMA_BIDIRECTIONAL);
+		dma_sync_single_for_cpu(&mali_platform_device->dev, page_private(src_page),
+					_MALI_OSK_MALI_PAGE_SIZE, DMA_BIDIRECTIONAL);
 #endif
 		memcpy(dst, src , _MALI_OSK_MALI_PAGE_SIZE);
 		kunmap_atomic(src);
 		dma_map_page(&mali_platform_device->dev, src_page,
-			     0, _MALI_OSK_MALI_PAGE_SIZE, DMA_BIDIRECTIONAL);
+			     0, _MALI_OSK_MALI_PAGE_SIZE, DMA_TO_DEVICE);
 	} else if (src_node->type == MALI_PAGE_NODE_BLOCK) {
 		/*
 		* use ioremap to map src for BLOCK memory
@@ -569,13 +555,10 @@ _mali_osk_errcode_t mali_mem_cow_allocate_on_demand(mali_mem_backend *mem_bkend,
 		}
 		mem_bkend->cow_mem.change_pages_nr++;
 	}
-    _mali_osk_mutex_wait(session->cow_lock);
 	if (_mali_mem_put_page_node(found_node)) {
 		__free_page(new_page);
-        _mali_osk_mutex_signal(session->cow_lock);
 		return _MALI_OSK_ERR_NOMEM;
 	}
-    _mali_osk_mutex_signal(session->cow_lock);
 	/* always use OS for COW*/
 	found_node->type = MALI_PAGE_NODE_OS;
 	_mali_page_node_add_page(found_node, new_page);

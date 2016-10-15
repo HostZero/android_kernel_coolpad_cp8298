@@ -47,8 +47,7 @@
 int g_current_sample_gl_utilization = 0;
 int g_current_sample_cl_utilization[2] = {0};
 
-#ifndef ENABLE_COMMON_DVFS
-#ifndef CONFIG_MTK_GPU_SPM_DVFS_SUPPORT
+#ifndef ENABLE_COMMON_DVFS	
 static enum hrtimer_restart dvfs_callback(struct hrtimer *timer)
 {
 	unsigned long flags;
@@ -70,7 +69,6 @@ static enum hrtimer_restart dvfs_callback(struct hrtimer *timer)
 
 	return HRTIMER_NORESTART;
 }
-#endif
 #endif
 #endif /* CONFIG_MALI_MIDGARD_DVFS */
 
@@ -97,8 +95,7 @@ int kbasep_pm_metrics_init(struct kbase_device *kbdev)
 	spin_lock_init(&kbdev->pm.backend.metrics.lock);
 
 #ifdef CONFIG_MALI_MIDGARD_DVFS
-#ifndef ENABLE_COMMON_DVFS
-#ifndef CONFIG_MTK_GPU_SPM_DVFS_SUPPORT
+#ifndef ENABLE_COMMON_DVFS	
 	kbdev->pm.backend.metrics.timer_active = true;
 	hrtimer_init(&kbdev->pm.backend.metrics.timer, CLOCK_MONOTONIC,
 							HRTIMER_MODE_REL);
@@ -107,7 +104,6 @@ int kbasep_pm_metrics_init(struct kbase_device *kbdev)
 	hrtimer_start(&kbdev->pm.backend.metrics.timer,
 			HR_TIMER_DELAY_MSEC(kbdev->pm.dvfs_period),
 			HRTIMER_MODE_REL);
-#endif
 #endif            
 #endif /* CONFIG_MALI_MIDGARD_DVFS */
 
@@ -287,19 +283,19 @@ int kbase_pm_get_dvfs_utilisation_old(struct kbase_device *kbdev,
 out:
 	return utilisation;
 }
-
+/// MTK_GED{
 void MTKCalGpuUtilization(unsigned int* pui32Loading , unsigned int* pui32Block,unsigned int* pui32Idle)
 {
-	struct kbase_device *kbdev = MaliGetMaliData();
+   struct kbase_device *kbdev = MaliGetMaliData();
+//-------------   
 	unsigned long flags;
 	int utilisation, util_gl_share;
 	int util_cl_share[2];
 	ktime_t now;
 
-	if (kbdev == NULL)
-		return;
+	KBASE_DEBUG_ASSERT(kbdev != NULL);
 
-	spin_lock_irqsave(&kbdev->pm.backend.metrics.lock, flags);
+    spin_lock_irqsave(&kbdev->pm.backend.metrics.lock, flags);
 
 	now = ktime_get();
 
@@ -307,15 +303,20 @@ void MTKCalGpuUtilization(unsigned int* pui32Loading , unsigned int* pui32Block,
 			util_cl_share, now);
 
 	kbase_pm_reset_dvfs_utilisation_unlocked(kbdev, now);
+//-------------
 
 	if(pui32Loading)
-		*pui32Loading = utilisation;
-	if(pui32Idle)
-		*pui32Idle = 100 - utilisation;
+        *pui32Loading = utilisation;
+    if(pui32Idle)
+        *pui32Idle = 100 - utilisation;
+    
+    /*
+    if(pui32Block)
+        *pui32Block = 0; // no ref value in r7px
+     */
 
-
-	if (utilisation < 0 || util_gl_share < 0 || util_cl_share[0] < 0 ||
-			util_cl_share[1] < 0) {
+		if (utilisation < 0 || util_gl_share < 0 || util_cl_share[0] < 0 ||
+							util_cl_share[1] < 0) {
 		utilisation = 0;
 		util_gl_share = 0;
 		util_cl_share[0] = 0;
@@ -323,33 +324,21 @@ void MTKCalGpuUtilization(unsigned int* pui32Loading , unsigned int* pui32Block,
 		goto out;
 	}
 
-	g_current_sample_gl_utilization = utilisation;
+	
+        g_current_sample_gl_utilization = utilisation;
 	g_current_sample_cl_utilization[0] = util_cl_share[0];
 	g_current_sample_cl_utilization[1] = util_cl_share[1];
 
 out:
+#if 0 //#ifdef CONFIG_MALI_MIDGARD_DVFS
+	kbase_platform_dvfs_event(kbdev, utilisation, util_gl_share,
+								util_cl_share);
+#endif				/*CONFIG_MALI_MIDGARD_DVFS */
+
 	spin_unlock_irqrestore(&kbdev->pm.backend.metrics.lock, flags);
+	
 }
-
-#ifdef CONFIG_PROC_FS
-u32 kbasep_get_gl_utilization(void)
-{
-	return g_current_sample_gl_utilization;
-}
-KBASE_EXPORT_TEST_API(kbasep_get_gl_utilization)
-
-u32 kbasep_get_cl_js0_utilization(void)
-{
-	return g_current_sample_cl_utilization[0];
-}
-KBASE_EXPORT_TEST_API(kbasep_get_cl_js0_utilization)
-
-u32 kbasep_get_cl_js1_utilization(void)
-{
-	return g_current_sample_cl_utilization[1];
-}
-KBASE_EXPORT_TEST_API(kbasep_get_cl_js1_utilization)
-#endif /*  CONFIG_PROC_FS  */
+///}
 
 void kbase_pm_get_dvfs_action(struct kbase_device *kbdev)
 {

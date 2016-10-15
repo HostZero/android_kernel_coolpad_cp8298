@@ -21,7 +21,6 @@
 /*#include "mach/mt_spm.h"*/
 /*#include "mach/mt_wdt.h"*/
 #include "mach/mt_clkmgr.h"
-#include "mali_control_timer.h"
 
 #include <asm/atomic.h>
 
@@ -365,7 +364,7 @@ static unsigned int mtk_get_mali_utilization(void)
 
 void mali_set_mali_SODI_begin(void)
 {
-    mali_control_timer_suspend(MALI_TRUE);
+    //mali_utilization_suspend();
 }
 
 
@@ -499,7 +498,7 @@ static int mapFrequencyToIndex(int frequency)
 
 /* this function will be called periodically with sampling period 200ms~1000ms */
 void mali_pmm_utilization_handler(struct mali_gpu_utilization_data *data)
-{    
+{
     int              utilization;
     mali_dvfs_action action;
     int              frequency;
@@ -509,7 +508,7 @@ void mali_pmm_utilization_handler(struct mali_gpu_utilization_data *data)
     int              deferred;
 
     mali_utilization = data->utilization_gpu;
-    
+
     if (0 == atomic_read(&g_is_power_enabled))
         
     {
